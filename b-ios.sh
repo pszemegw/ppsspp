@@ -41,11 +41,18 @@ xcodebuild -project PPSSPP.xcodeproj -scheme PPSSPP -sdk iphoneos -configuration
 # Export IPA file from xcarchive (probably only works with signed build)
 #xcodebuild -exportArchive -archivePath ./build/PPSSPP.xcarchive -exportPath ./build -exportOptionsPlist exportOptions.plist
 # This folder only exist when building with xcodebuild
-if [ -e Release-iphoneos ]; then
-	# It seems there is an existing (from ccache?) PPSSPP.app symlink, so we copy & overwrites the content instead of the symlink, to the same location with what make use.
-	mkdir -p PPSSPP.app
-	cp -Rfa Release-iphoneos/PPSSPP.app/. PPSSPP.app/
+if [ -d Release-iphoneos/PPSSPP.app ]; then
+    APP_SOURCE="Release-iphoneos/PPSSPP.app"
+elif [ -d build/PPSSPP.xcarchive/Products/Applications/PPSSPP.app ]; then
+    APP_SOURCE="build/PPSSPP.xcarchive/Products/Applications/PPSSPP.app"
+else
+    echo "ERROR: Cannot find PPSSPP.app" >&2
+    find . -type d -name PPSSPP.app -print
+    exit 1
 fi
+
+mkdir -p PPSSPP.app
+cp -Rfa "$APP_SOURCE/." PPSSPP.app/
 
 # Build PPSSPP using Makefile (Might have missing stuff like Icons, similar to ./b.sh --ios)
 #cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/Toolchains/ios.cmake ..
