@@ -5,7 +5,7 @@ on:
 jobs:
   ios:
     name: Generate IPA & DEB
-    runs-on: macos-latest
+    runs-on: macos-15-intel #macos-latest
 
     steps:
       - uses: actions/checkout@v7
