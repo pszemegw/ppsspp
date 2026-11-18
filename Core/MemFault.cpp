@@ -291,6 +291,21 @@ bool HandleFault(uintptr_t hostAddress, void *ctx) {
 		// We know which register the address is in, look in Asm.cpp.
 		targetAddr = (uint32_t)context->Rax;
 #endif
+#if PPSSPP_ARCH(ARM64)
+		// Diagnose the repeatable Cube Sample startup failure without changing generated JIT code.
+		// The prior JitAt() hook cannot see faults in an inlined block-shadow lookup.
+		if (targetAddr == 0x0FFFFFFC || currentMIPS->pc == 0xFFFFFFFC) {
+			const u32 sp = currentMIPS->r[MIPS_REG_SP];
+			const u32 savedRA0 = IsValid4AlignedAddress(sp + 0x0C) ? ReadUnchecked_U32(sp + 0x0C) : 0;
+			const u32 savedRA1 = IsValid4AlignedAddress(sp + 0x1C) ? ReadUnchecked_U32(sp + 0x1C) : 0;
+			ERROR_LOG(Log::MemMap,
+				"[CUBE-FAULT] target=%08x mips_pc=%08x sp=%08x ra=%08x v0=%08x "
+				"stack[sp+0c]=%08x stack[sp+1c]=%08x native_pc=%p host_address=%p shadow=%d",
+				targetAddr, currentMIPS->pc, sp, currentMIPS->r[MIPS_REG_RA],
+				currentMIPS->r[MIPS_REG_V0], savedRA0, savedRA1,
+				(void *)(uintptr_t)context->CTX_PC, (void *)hostAddress, shadowFault ? 1 : 0);
+		}
+#endif
 		Core_ExecException(targetAddr, currentMIPS->pc, ExecExceptionType::JUMP);
 		// Redirect execution to a crash handler that will switch to CoreState::CORE_RUNTIME_ERROR immediately.
 		uintptr_t crashHandler = (uintptr_t)mipsr4k.jit->GetCrashHandler();
