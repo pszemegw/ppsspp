@@ -19,6 +19,7 @@
 // In other words, PPSSPP_ARCH(ARM64) || DISASM_ALL.
 #if PPSSPP_ARCH(ARM64) || (PPSSPP_PLATFORM(WINDOWS) && !defined(__LIBRETRO__))
 
+#include "Common/Log.h"
 #include "Common/Profiler/Profiler.h"
 #include "Core/Core.h"
 #include "Core/Debugger/Breakpoints.h"
@@ -44,6 +45,21 @@ namespace MIPSComp {
 
 using namespace Arm64Gen;
 using namespace Arm64IRJitConstants;
+
+// Temporary diagnostic instrumentation for Cube Sample startup on iOS.
+// This is called from emitted ARM64 code only after FlushAll/SaveStaticRegisters.
+static void TraceCubeHLE(MIPSState *mips, u32 phase) {
+	if (!mips)
+		return;
+	const u32 pc = mips->pc;
+	if ((pc & 0xFFFFF000) != 0x08900000 && pc != 0xFFFFFFFC && pc != 0x0FFFFFFC)
+		return;
+	ERROR_LOG(Log::JIT,
+		"[CUBE-HLE] %s pc=%08x sp=%08x ra=%08x a0=%08x a1=%08x v0=%08x",
+		phase ? "after" : "before", pc, mips->r[MIPS_REG_SP],
+		mips->r[MIPS_REG_RA], mips->r[MIPS_REG_A0], mips->r[MIPS_REG_A1],
+		mips->r[MIPS_REG_V0]);
+}
 
 void Arm64JitBackend::CompIR_Basic(IRInst inst) {
 	CONDITIONAL_DISABLE;
@@ -211,6 +227,9 @@ void Arm64JitBackend::CompIR_System(IRInst inst) {
 	case IROp::Syscall:
 		FlushAll();
 		SaveStaticRegisters();
+		MOVP2R(X0, mips_);
+		MOVI2R(W1, 0);
+		QuickCallFunction(SCRATCH2_64, &TraceCubeHLE);
 
 		WriteDebugProfilerStatus(IRProfilerStatus::SYSCALL);
 		// Skip the CallSyscall where possible (GetQuickSyscallFunc says when not).
@@ -236,6 +255,9 @@ void Arm64JitBackend::CompIR_System(IRInst inst) {
 			}
 		}
 
+		MOVP2R(X0, mips_);
+		MOVI2R(W1, 1);
+		QuickCallFunction(SCRATCH2_64, &TraceCubeHLE);
 		WriteDebugProfilerStatus(IRProfilerStatus::IN_JIT);
 		LoadStaticRegisters();
 		// This is always followed by an ExitToPC, where we check coreState.

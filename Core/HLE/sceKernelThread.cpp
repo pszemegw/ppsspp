@@ -1441,6 +1441,14 @@ u32 sceKernelGetThreadmanIdList(u32 type, u32 readBufPtr, u32 readBufSize, u32 i
 	return total > readBufSize ? readBufSize : total;
 }
 
+// Temporary diagnostic instrumentation, limited to Cube Sample's startup text.
+static void TraceCubeThread(const char *stage, u32 pc, u32 sp, u32 ra) {
+	if ((pc & 0xFFFFF000) != 0x08900000 && pc != 0xFFFFFFFC && pc != 0x0FFFFFFC)
+		return;
+	ERROR_LOG(Log::sceKernel,
+		"[CUBE-THREAD] %s pc=%08x sp=%08x ra=%08x", stage, pc, sp, ra);
+}
+
 // Saves the current CPU context
 void __KernelSaveContext(PSPThreadContext *ctx, bool vfpuEnabled) {
 	// r and f are immediately next to each other and must be. Ignore static analyzer warnings here!
@@ -2288,6 +2296,11 @@ int __KernelStartThread(SceUID threadToStartID, int argSize, u32 argBlockPtr, bo
 	// Point ra at our return stub, and start fp off matching sp.
 	startThread->context.r[MIPS_REG_RA] = sp;
 	startThread->context.r[MIPS_REG_FP] = sp;
+	TraceCubeThread("start caller", currentMIPS->pc,
+		currentMIPS->r[MIPS_REG_SP], currentMIPS->r[MIPS_REG_RA]);
+	TraceCubeThread("start target", startThread->context.pc,
+		startThread->context.r[MIPS_REG_SP],
+		startThread->context.r[MIPS_REG_RA]);
 
 	// Smaller is better for priority.  Only switch if the new thread is better.
 	if (cur && cur->nt.currentPriority > startThread->nt.currentPriority) {
@@ -3334,6 +3347,8 @@ void __KernelSwitchContext(PSPThread *target, const char *reason) {
 
 	if (cur)  // It might just have been deleted.
 	{
+		TraceCubeThread("switch out", currentMIPS->pc,
+			currentMIPS->r[MIPS_REG_SP], currentMIPS->r[MIPS_REG_RA]);
 		__KernelSaveContext(&cur->context, (cur->nt.attr & PSP_THREAD_ATTR_VFPU) != 0);
 		oldPC = currentMIPS->pc;
 		oldUID = cur->GetUID();
@@ -3349,6 +3364,8 @@ void __KernelSwitchContext(PSPThread *target, const char *reason) {
 		target->nt.status = (target->nt.status | THREADSTATUS_RUNNING) & ~THREADSTATUS_READY;
 
 		__KernelLoadContext(&target->context, (target->nt.attr & PSP_THREAD_ATTR_VFPU) != 0);
+		TraceCubeThread("switch in", currentMIPS->pc,
+			currentMIPS->r[MIPS_REG_SP], currentMIPS->r[MIPS_REG_RA]);
 	} else {
 		__SetCurrentThread(NULL, 0, NULL);
 	}
