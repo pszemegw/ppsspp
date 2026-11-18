@@ -25,6 +25,7 @@
 #include "ext/udis86/udis86.h"
 #include "ext/loongarch-disasm.h"
 
+#include "Common/Log.h"
 #include "Common/LogReporting.h"
 #include "Common/StringUtils.h"
 #include "Common/Serialize/Serializer.h"
@@ -59,6 +60,10 @@ namespace MIPSComp {
 		// The dispatcher's block shadow lookup folds the mirror bits (and more on 32-bit), so a bad pc can
 		// get here without faulting. The dispatchers check coreState after this returns.
 		if (!mips->space->IsValid4AlignedAddress(mips->pc)) {
+			ERROR_LOG(Log::JIT,
+				"[CUBE-BAD-PC] pc=%08x sp=%08x ra=%08x a0=%08x a1=%08x v0=%08x",
+				mips->pc, mips->r[MIPS_REG_SP], mips->r[MIPS_REG_RA],
+				mips->r[MIPS_REG_A0], mips->r[MIPS_REG_A1], mips->r[MIPS_REG_V0]);
 			Core_ExecException(mips->pc, mips->pc, ExecExceptionType::JUMP);
 			return;
 		}
