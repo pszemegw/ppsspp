@@ -152,7 +152,7 @@ bool Arm64JitBackend::CompileBlock(int block_num, u32 startPC, const IRInst *ins
 		}
 	}
 #if PPSSPP_PLATFORM(IOS)
-	const bool traceCubeBlock = startPC >= 0x08900000 && startPC < 0x08901000;
+	const bool traceCubeBlock = startPC >= 0x08900000 && startPC < 0x08910000;
 	// Room for explicit register flush, static-register save, and the trace callback.
 	if (traceCubeBlock)
 		sizeEstimate += (size_t)count * 256;
