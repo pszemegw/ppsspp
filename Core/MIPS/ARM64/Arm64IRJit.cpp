@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <map>
+#include "Common/Log.h"
 #include "Core/MemMap.h"
 #include "Core/MIPS/MIPSTables.h"
 #include "Core/MIPS/ARM64/Arm64IRJit.h"
@@ -60,6 +61,61 @@ void Arm64JitBackend::UpdateFCR31(MIPSState *mipsState) {
 	currentRoundingFunc_ = convertS0ToSCRATCH1_[mipsState->fcr31 & 3];
 }
 
+// Temporary iOS-only instruction-by-instruction trace for Cube Sample's startup.
+// Captures the guest state before every emitted IR instruction in the selected blocks.
+// This intentionally flushes register caches, so it may affect a register-allocation bug.
+#if PPSSPP_PLATFORM(IOS)
+static u32 g_cubeTraceStep = 0;
+static constexpr u32 CUBE_TRACE_MAX_STEPS = 8192;
+
+static void TraceCubeIRStep(MIPSState *mips, u32 blockPC, u32 irIndex, u64 encodedIR) {
+	if (!mips || g_cubeTraceStep >= CUBE_TRACE_MAX_STEPS)
+		return;
+	const u32 seq = ++g_cubeTraceStep;
+	const IROp op = (IROp)(encodedIR & 0xff);
+	const IRMeta *meta = GetIRMeta(op);
+	const u32 dest = (u32)((encodedIR >> 8) & 0xff);
+	const u32 src1 = (u32)((encodedIR >> 16) & 0xff);
+	const u32 src2 = (u32)((encodedIR >> 24) & 0xff);
+	const u32 constant = (u32)(encodedIR >> 32);
+	const u32 sp = mips->r[MIPS_REG_SP];
+	const auto stackWord = [sp](u32 offset) -> u32 {
+		const u32 address = sp + offset;
+		return Memory::IsValid4AlignedAddress(address) ? Memory::ReadUnchecked_U32(address) : 0;
+	};
+	ERROR_LOG(Log::MemMap,
+		"[CUBE-STEP] #%05u block=%08x ir=%03u op=%s d=%u s1=%u s2=%u imm=%08x "
+		"pc=%08x sp=%08x ra=%08x v0=%08x a0=%08x a1=%08x",
+		seq, blockPC, irIndex, meta ? meta->name : "?", dest, src1, src2, constant,
+		mips->pc, sp, mips->r[MIPS_REG_RA], mips->r[MIPS_REG_V0],
+		mips->r[MIPS_REG_A0], mips->r[MIPS_REG_A1]);
+	ERROR_LOG(Log::MemMap,
+		"[CUBE-GPR] #%05u r00-31="
+		"%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,"
+		"%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,"
+		"%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,"
+		"%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x",
+		seq,
+		mips->r[0], mips->r[1], mips->r[2], mips->r[3],
+		mips->r[4], mips->r[5], mips->r[6], mips->r[7],
+		mips->r[8], mips->r[9], mips->r[10], mips->r[11],
+		mips->r[12], mips->r[13], mips->r[14], mips->r[15],
+		mips->r[16], mips->r[17], mips->r[18], mips->r[19],
+		mips->r[20], mips->r[21], mips->r[22], mips->r[23],
+		mips->r[24], mips->r[25], mips->r[26], mips->r[27],
+		mips->r[28], mips->r[29], mips->r[30], mips->r[31]);
+	ERROR_LOG(Log::MemMap,
+		"[CUBE-STACK] #%05u sp=%08x words[+00..+2c]="
+		"%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x",
+		seq, sp, stackWord(0), stackWord(4), stackWord(8), stackWord(12),
+		stackWord(16), stackWord(20), stackWord(24), stackWord(28),
+		stackWord(32), stackWord(36), stackWord(40), stackWord(44));
+	if (seq == CUBE_TRACE_MAX_STEPS) {
+		ERROR_LOG(Log::MemMap, "[CUBE-STEP-LIMIT] Stopped after %u steps; restart PPSSPP for a new trace.", seq);
+	}
+}
+#endif
+
 static void NoBlockExits() {
 	_assert_msg_(false, "Never exited block, invalid IR?");
 }
@@ -95,6 +151,12 @@ bool Arm64JitBackend::CompileBlock(int block_num, u32 startPC, const IRInst *ins
 			break;
 		}
 	}
+#if PPSSPP_PLATFORM(IOS)
+	const bool traceCubeBlock = startPC >= 0x08900000 && startPC < 0x08901000;
+	// Room for explicit register flush, static-register save, and the trace callback.
+	if (traceCubeBlock)
+		sizeEstimate += (size_t)count * 256;
+#endif
 	BeginWrite(std::min(GetSpaceLeft(), sizeEstimate));
 
 	bool wroteCheckedOffset = false;
@@ -130,6 +192,22 @@ bool Arm64JitBackend::CompileBlock(int block_num, u32 startPC, const IRInst *ins
 		compilingIndex_ = i;
 		addresses.push_back(GetCodePtr());
 
+#if PPSSPP_PLATFORM(IOS)
+		if (traceCubeBlock) {
+			// Capture a consistent guest state before each IR operation.
+			// The next snapshot represents the state after the preceding operation.
+			FlushAll();
+			SaveStaticRegisters();
+			const u64 encodedIR = (u64)(u8)inst.op | ((u64)inst.dest << 8) |
+				((u64)inst.src1 << 16) | ((u64)inst.src2 << 24) | ((u64)inst.constant << 32);
+			MOVP2R(X0, mips_);
+			MOVI2R(W1, startPC);
+			MOVI2R(W2, (u32)i);
+			MOVI2R(X3, encodedIR);
+			QuickCallFunction(SCRATCH2_64, &TraceCubeIRStep);
+			LoadStaticRegisters();
+		}
+#endif
 		CompileIRInst(inst);
 		if (skipNextInst_) {
 			// It was compiled together with this one.
