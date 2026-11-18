@@ -44,6 +44,12 @@ Arm64JitBackend::Arm64JitBackend(JitOptions &jitopt)
 	// Automatically disable incompatible options. Pointerify also depends on the CPU's memory base,
 	// checked in GenerateFixedCode().
 	jo.optimizeForInterpreter = false;
+#if PPSSPP_PLATFORM(IOS)
+	// Diagnosis only: force guest GPRs to memory after every IR instruction
+	// without per-instruction callbacks or logging. Tests whether the JIT
+	// failure depends on register-cache lifetime.
+	jo.disableFlags = jo.disableFlags | JitDisable::REGALLOC_GPR;
+#endif
 #ifdef MASKED_PSP_MEMORY
 	jo.enablePointerify = false;
 #endif
