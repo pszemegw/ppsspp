@@ -44,6 +44,12 @@ Arm64JitBackend::Arm64JitBackend(JitOptions &jitopt)
 	// Automatically disable incompatible options. Pointerify also depends on the CPU's memory base,
 	// checked in GenerateFixedCode().
 	jo.optimizeForInterpreter = false;
+#if PPSSPP_PLATFORM(IOS)
+	// Diagnostic: isolate static ARM64 register allocation without disabling
+	// normal guest GPR register caching. JitOptions sets this in its ctor,
+	// so update the derived switch itself, not only disableFlags.
+	jo.useStaticAlloc = false;
+#endif
 #ifdef MASKED_PSP_MEMORY
 	jo.enablePointerify = false;
 #endif
