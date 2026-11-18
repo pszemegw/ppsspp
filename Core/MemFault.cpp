@@ -291,6 +291,15 @@ bool HandleFault(uintptr_t hostAddress, void *ctx) {
 		// We know which register the address is in, look in Asm.cpp.
 		targetAddr = (uint32_t)context->Rax;
 #endif
+		// Diagnostic: capture guest state before Core_ExecException can alter the core state.
+		// Keep this on the exceptional path, not in the interpreter or every JIT syscall.
+		ERROR_LOG(Log::MemMap,
+			"[CUBE-FAULT] target=%08x guest_pc=%08x sp=%08x ra=%08x gp=%08x a0=%08x a1=%08x v0=%08x host_fault=%p host_pc=%p shadow=%d",
+			targetAddr, currentMIPS->pc, currentMIPS->r[MIPS_REG_SP],
+			currentMIPS->r[MIPS_REG_RA], currentMIPS->r[MIPS_REG_GP],
+			currentMIPS->r[MIPS_REG_A0], currentMIPS->r[MIPS_REG_A1],
+			currentMIPS->r[MIPS_REG_V0], (void *)hostAddress,
+			(void *)context->CTX_PC, (int)shadowFault);
 		Core_ExecException(targetAddr, currentMIPS->pc, ExecExceptionType::JUMP);
 		// Redirect execution to a crash handler that will switch to CoreState::CORE_RUNTIME_ERROR immediately.
 		uintptr_t crashHandler = (uintptr_t)mipsr4k.jit->GetCrashHandler();
