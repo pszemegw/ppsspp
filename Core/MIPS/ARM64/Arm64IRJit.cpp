@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <map>
+#include "Common/MemoryUtil.h"
 #include "Core/MemMap.h"
 #include "Core/MIPS/MIPSTables.h"
 #include "Core/MIPS/ARM64/Arm64IRJit.h"
@@ -101,6 +102,14 @@ bool Arm64JitBackend::CompileBlock(int block_num, u32 startPC, const IRInst *ins
 			break;
 		}
 	}
+#if PPSSPP_PLATFORM(IOS)
+	// Diagnostic for a possible underestimated code emission size on the
+	// mprotect W^X fallback: cover two additional system pages. This is
+	// deliberately conservative and may reduce JIT performance.
+	const size_t originalSizeEstimate = sizeEstimate;
+	const u8 *const blockWriteStart = GetCodePointer();
+	sizeEstimate += 2 * (size_t)GetMemoryProtectPageSize();
+#endif
 	BeginWrite(std::min(GetSpaceLeft(), sizeEstimate));
 
 	bool wroteCheckedOffset = false;
@@ -219,6 +228,13 @@ bool Arm64JitBackend::CompileBlock(int block_num, u32 startPC, const IRInst *ins
 		}
 	}
 
+#if PPSSPP_PLATFORM(IOS)
+	const size_t actualCodeSize = (size_t)(GetCodePointer() - blockWriteStart);
+	if (actualCodeSize > originalSizeEstimate) {
+		WARN_LOG(Log::JIT, "[WX-ESTIMATE] block=%08x estimate=%zu emitted=%zu excess=%zu",
+			startPC, originalSizeEstimate, actualCodeSize, actualCodeSize - originalSizeEstimate);
+	}
+#endif
 	EndWrite();
 	// Flushed with the links, after FinalizeBlock.
 	const u8 *flushStart, *flushEnd;
